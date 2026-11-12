@@ -33,6 +33,8 @@ final class DeviceStore {
         didSet { UserDefaults.standard.set(showShutdownSimulators, forKey: Keys.showShutdown) }
     }
 
+    var deviceSettings: DeviceSettingsFile
+
     private var busy: Set<String> = []
     private var pollStarted = false
     private var flashGeneration = 0
@@ -57,6 +59,7 @@ final class DeviceStore {
         bootSlim = defaults.bool(forKey: Keys.bootSlim)
         launchAfterInstall = defaults.bool(forKey: Keys.launchAfterInstall)
         showShutdownSimulators = defaults.bool(forKey: Keys.showShutdown)
+        deviceSettings = DeviceSettingsStore.load()
     }
 
     var visibleSimulators: [SimulatorDevice] {
@@ -67,6 +70,34 @@ final class DeviceStore {
 
     func isBusy(_ id: String) -> Bool {
         busy.contains(id)
+    }
+
+    // MARK: - Settings
+
+    func androidSettings(for device: AndroidDevice) -> AndroidLaunchSettings {
+        deviceSettings.android[device.avdName] ?? AndroidLaunchSettings()
+    }
+
+    func update(_ settings: AndroidLaunchSettings, for device: AndroidDevice) {
+        deviceSettings.android[device.avdName] = settings
+        persistSettings()
+    }
+
+    func simslimSettings(for device: SimulatorDevice) -> SimslimSettings {
+        deviceSettings.simslim[device.udid] ?? SimslimSettings()
+    }
+
+    func update(_ settings: SimslimSettings, for device: SimulatorDevice) {
+        deviceSettings.simslim[device.udid] = settings
+        persistSettings()
+    }
+
+    private func persistSettings() {
+        do {
+            try DeviceSettingsStore.save(deviceSettings)
+        } catch {
+            lastError = "Could not save device settings: \(error.localizedDescription)"
+        }
     }
 
     // MARK: - Refresh
@@ -120,12 +151,18 @@ final class DeviceStore {
 
             if preferSlim && SimslimService.isInstalled && simulator.slim.needsSlimming {
                 flash("Slimming and booting \(simulator.name)…")
-                try await SimslimService.enable(udid: simulator.udid)
+                try await SimslimService.enable(
+                    udid: simulator.udid,
+                    settings: simslimSettings(for: simulator)
+                )
             } else if !simulator.isBooted {
                 flash("Booting \(simulator.name)…")
                 try await SimctlService.bootAndWait(simulator.udid)
             } else if preferSlim {
-                try await SimslimService.enable(udid: simulator.udid)
+                try await SimslimService.enable(
+                    udid: simulator.udid,
+                    settings: simslimSettings(for: simulator)
+                )
             }
 
             await SimctlService.openSimulatorApp()
@@ -168,7 +205,10 @@ final class DeviceStore {
                 flash("\(simulator.name) restored to stock.")
             } else {
                 flash("Slimming \(simulator.name)… this reboots the simulator.")
-                try await SimslimService.enable(udid: simulator.udid)
+                try await SimslimService.enable(
+                    udid: simulator.udid,
+                    settings: simslimSettings(for: simulator)
+                )
                 flash("\(simulator.name) is slim.")
             }
             await SimctlService.openSimulatorApp()
@@ -188,7 +228,10 @@ final class DeviceStore {
             if !simulator.isBooted {
                 if bootSlim && SimslimService.isInstalled && simulator.slim.needsSlimming {
                     flash("Slimming and booting \(simulator.name)…")
-                    try await SimslimService.enable(udid: simulator.udid)
+                    try await SimslimService.enable(
+                        udid: simulator.udid,
+                        settings: simslimSettings(for: simulator)
+                    )
                 } else {
                     flash("Booting \(simulator.name)…")
                     try await SimctlService.bootAndWait(simulator.udid)
@@ -227,7 +270,10 @@ final class DeviceStore {
                 return
             }
             flash("Booting \(emulator.avdName) via avdslim…")
-            let log = try await AndroidService.start(avd: emulator.avdName)
+            let log = try await AndroidService.start(
+                avd: emulator.avdName,
+                settings: androidSettings(for: emulator)
+            )
             let serial = try await AndroidService.waitForRunning(
                 avd: emulator.avdName,
                 timeout: 300,
@@ -288,7 +334,10 @@ final class DeviceStore {
 
             if serial == nil {
                 flash("Booting \(emulator.avdName) via avdslim…")
-                let log = try await AndroidService.start(avd: emulator.avdName)
+                let log = try await AndroidService.start(
+                    avd: emulator.avdName,
+                    settings: androidSettings(for: emulator)
+                )
                 serial = try await AndroidService.waitForRunning(
                     avd: emulator.avdName,
                     timeout: 300,
@@ -436,6 +485,7 @@ final class DeviceStore {
         lines.append("emulator: \(AndroidService.emulatorPath ?? "not found")")
         lines.append("Android SDK: \(AndroidService.sdkRoot ?? "not found")")
         lines.append("simslim managed labels: \(SimslimManagedLabels.all.count)")
+        lines.append("device settings: \(DeviceSettingsStore.fileURL.path)")
         return lines.joined(separator: "\n")
     }
 

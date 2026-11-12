@@ -30,6 +30,8 @@ Extras:
 
 - Drag-and-drop `.app` / `.apk` onto the Manager window.
 - Per-device **Installed Apps…** sheet with confirmation before uninstall.
+- Per-emulator **Launch Settings…** for camera (back/front webcam or virtual scene), host audio, RAM and low-RAM mode.
+- Per-simulator **Simslim Options…** for `--except` categories and `--keep` daemons.
 - Menu bar popover for quick boot/stop, plus a full Manager window.
 - Settings: slim on boot, launch after install, show shutdown simulators.
 - Host memory for running Android emulators (qemu RSS).
@@ -74,6 +76,7 @@ The app is ad-hoc signed and runs unsandboxed so it can spawn `xcrun`, `simslim`
 3. `⋯` menu per device:
    - Boot slim / boot stock
    - Slim or restore services
+   - Launch Settings… (Android) / Simslim Options… (iOS)
    - Install & launch a local file
    - Installed Apps…
    - Copy UDID / serial
@@ -85,6 +88,19 @@ always use `avdslim start`, which applies:
 - `-lowram` + `-memory` (no qemu 4 GB floor)
 - `-gpu host` (Metal instead of software rasterization)
 - guest debloating and `avdslim_clean` golden snapshot when present
+
+### Android camera
+
+`avdslim start` passes `-camera-back none -camera-front none` unless the AVD has
+`avdslim.camera=yes`. To use a camera, open `⋯` → **Launch Settings…**, choose
+**Virtual scene** (back) or **Webcam 0/1** (front/back), then restart the
+emulator. OrbitSlim merges `hw.camera.back` / `hw.camera.front` and
+`avdslim.camera=yes` into `<avd>.avd/config.ini` before boot. The same file is
+used by Android Studio, so the setting survives launches outside OrbitSlim.
+
+Per-device settings are stored in
+`~/Library/Application Support/OrbitSlim/device-settings.json` and shared with
+`orbitslimctl`.
 
 ## CLI
 

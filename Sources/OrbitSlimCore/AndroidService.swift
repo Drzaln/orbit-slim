@@ -171,21 +171,24 @@ public enum AndroidService {
     /// Launch through avdslim when present so `-lowram`, `-memory`, GPU host,
     /// guest debloating and the golden snapshot all apply. Falls back to the
     /// stock emulator with equivalent flags.
-    public static func start(avd: String) async throws -> URL? {
+    ///
+    /// Per-AVD settings are written to `config.ini` first. That is the only
+    /// way to keep a camera enabled through `avdslim start`, which injects
+    /// `-camera-back none -camera-front none` unless `avdslim.camera=yes`.
+    public static func start(
+        avd: String,
+        settings: AndroidLaunchSettings = AndroidLaunchSettings()
+    ) async throws -> URL? {
+        try applyLaunchSettings(settings, toAVD: avd)
+
         let arguments: [String]
         let executable: String
         if let avdslim = Shell.findTool("avdslim") {
             executable = avdslim
-            arguments = ["start", avd]
+            arguments = ["start", avd] + settings.avdslimArguments
         } else if let emulator = emulatorPath {
             executable = emulator
-            arguments = [
-                "@\(avd)",
-                "-memory", "1536",
-                "-lowram",
-                "-gpu", "host",
-                "-no-audio",
-            ]
+            arguments = ["@\(avd)", "-gpu", "host"] + settings.emulatorArguments()
         } else {
             throw ShellError.toolNotFound("emulator")
         }
@@ -195,6 +198,77 @@ public enum AndroidService {
             arguments: arguments,
             logName: "avd-\(avd).log"
         )
+    }
+
+    // MARK: - AVD configuration
+
+    /// Locates `<avd>.avd/config.ini` across the usual Android homes.
+    public static func avdConfigURL(for avd: String) -> URL? {
+        guard !avd.isEmpty, !avd.contains("/"), !avd.contains("..") else { return nil }
+
+        let env = ProcessInfo.processInfo.environment
+        var roots: [String] = []
+        if let home = env["ANDROID_AVD_HOME"], !home.isEmpty {
+            roots.append((home as NSString).expandingTildeInPath)
+        }
+        if let home = env["ANDROID_USER_HOME"], !home.isEmpty {
+            roots.append(((home as NSString).expandingTildeInPath as NSString)
+                .appendingPathComponent("avd"))
+        }
+        roots.append(NSHomeDirectory() + "/.android/avd")
+        roots.append(NSHomeDirectory() + "/.config/.android/avd")
+
+        var seen = Set<String>()
+        for root in roots {
+            let path = root + "/\(avd).avd/config.ini"
+            guard seen.insert(path).inserted else { continue }
+            if FileManager.default.fileExists(atPath: path) {
+                return URL(fileURLWithPath: path)
+            }
+        }
+        return nil
+    }
+
+    /// Merges camera/audio overrides into the AVD config without disturbing
+    /// unrelated keys. Changes take effect on the next emulator start.
+    public static func applyLaunchSettings(
+        _ settings: AndroidLaunchSettings,
+        toAVD avd: String
+    ) throws {
+        let overrides = settings.avdConfigOverrides
+        guard !overrides.isEmpty else { return }
+        guard let url = avdConfigURL(for: avd) else {
+            throw ShellError.commandFailed(
+                command: "configure AVD",
+                status: -1,
+                message: "Could not find the config.ini for \(avd)."
+            )
+        }
+
+        let original = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        var lines = original
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .components(separatedBy: "\n")
+
+        for key in overrides.keys.sorted() {
+            guard let value = overrides[key] else { continue }
+            var replaced = false
+            for index in lines.indices {
+                let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
+                guard trimmed.hasPrefix(key + "=") else { continue }
+                lines[index] = "\(key)=\(value)"
+                replaced = true
+                break
+            }
+            if !replaced {
+                if lines.last == "" { lines.removeLast() }
+                lines.append("\(key)=\(value)")
+            }
+        }
+
+        var output = lines.joined(separator: "\n")
+        if !output.hasSuffix("\n") { output += "\n" }
+        try output.write(to: url, atomically: true, encoding: .utf8)
     }
 
     public static func waitForRunning(

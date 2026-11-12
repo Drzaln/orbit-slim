@@ -156,6 +156,7 @@ struct SimulatorRow: View {
     let device: SimulatorDevice
     @Bindable var store: DeviceStore
     @Environment(\.openWindow) private var openWindow
+    @State private var showSlimSettings = false
 
     private var busy: Bool { store.isBusy("sim:\(device.udid)") }
 
@@ -217,6 +218,10 @@ struct SimulatorRow: View {
                 }
                 .disabled(busy)
 
+                Button("Simslim Options…") {
+                    showSlimSettings = true
+                }
+
                 Button("Install & Launch .app…") {
                     guard let url = InstallFilePicker.choose(platform: .ios) else { return }
                     Task { await store.install(file: url, simulator: device) }
@@ -255,6 +260,9 @@ struct SimulatorRow: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
+        .sheet(isPresented: $showSlimSettings) {
+            SimulatorSlimSettingsView(device: device, store: store)
+        }
     }
 }
 
@@ -262,6 +270,7 @@ struct AndroidRow: View {
     let device: AndroidDevice
     @Bindable var store: DeviceStore
     @Environment(\.openWindow) private var openWindow
+    @State private var showLaunchSettings = false
 
     private var busy: Bool { store.isBusy("android:\(device.avdName)") }
 
@@ -337,6 +346,10 @@ struct AndroidRow: View {
                 }
                 .disabled(!device.isRunning || busy)
 
+                Button("Launch Settings…") {
+                    showLaunchSettings = true
+                }
+
                 Button("Install & Launch .apk…") {
                     guard let url = InstallFilePicker.choose(platform: .android) else { return }
                     Task { await store.install(file: url, emulator: device) }
@@ -377,6 +390,141 @@ struct AndroidRow: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
+        .sheet(isPresented: $showLaunchSettings) {
+            AndroidLaunchSettingsView(device: device, store: store)
+        }
+    }
+}
+
+// MARK: - Device settings
+
+struct AndroidLaunchSettingsView: View {
+    let device: AndroidDevice
+    @Bindable var store: DeviceStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var settings: AndroidLaunchSettings
+
+    init(device: AndroidDevice, store: DeviceStore) {
+        self.device = device
+        self.store = store
+        _settings = State(initialValue: store.androidSettings(for: device))
+    }
+
+    private let ramOptions: [Int?] = [nil, 1024, 1536, 2048, 3072, 4096]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Launch Settings")
+                    .font(.system(size: 15, weight: .semibold))
+                Text(device.avdName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Form {
+                Section("Camera") {
+                    Picker("Back", selection: $settings.cameraBack) {
+                        ForEach(AndroidCameraSetting.allCases, id: \.self) { setting in
+                            Text(setting.displayName).tag(setting)
+                        }
+                    }
+                    Picker("Front", selection: $settings.cameraFront) {
+                        ForEach(AndroidCameraSetting.allCases, id: \.self) { setting in
+                            Text(setting.displayName).tag(setting)
+                        }
+                    }
+                }
+
+                Section("Audio") {
+                    Picker("Host audio", selection: $settings.audio) {
+                        ForEach(AndroidAudioSetting.allCases, id: \.self) { setting in
+                            Text(setting.displayName).tag(setting)
+                        }
+                    }
+                }
+
+                Section("Resources") {
+                    Picker("RAM", selection: $settings.ramMB) {
+                        Text("avdslim default").tag(Int?.none)
+                        ForEach(ramOptions.compactMap { $0 }, id: \.self) { mb in
+                            Text("\(mb) MB").tag(Int?.some(mb))
+                        }
+                    }
+                    Toggle("Low-RAM mode (-lowram)", isOn: $settings.lowRAM)
+                }
+            }
+            .formStyle(.grouped)
+
+            Text("Camera and audio are merged into \(device.avdName).avd/config.ini before boot. Restart the emulator to apply. Webcam 0/1 map to `emulator -webcam-list`.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    store.update(settings, for: device)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(18)
+        .frame(width: 440)
+    }
+}
+
+struct SimulatorSlimSettingsView: View {
+    let device: SimulatorDevice
+    @Bindable var store: DeviceStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var settings: SimslimSettings
+
+    init(device: SimulatorDevice, store: DeviceStore) {
+        self.device = device
+        self.store = store
+        _settings = State(initialValue: store.simslimSettings(for: device))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Simslim Options")
+                    .font(.system(size: 15, weight: .semibold))
+                Text(device.name)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Form {
+                Section("Keep running") {
+                    TextField("Categories (--except)", text: $settings.exceptCategories)
+                    TextField("Daemons (--keep)", text: $settings.keepDaemons)
+                }
+            }
+            .formStyle(.grouped)
+
+            Text("Comma-separated IDs. Categories are listed by `simslim profiles`; daemons are launchd labels. Applied the next time OrbitSlim slims this simulator.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    store.update(settings, for: device)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(18)
+        .frame(width: 460)
     }
 }
 

@@ -91,6 +91,7 @@ struct OrbitSlimCLI {
         print("emulator: \(AndroidService.emulatorPath ?? "not found")")
         print("Android SDK: \(AndroidService.sdkRoot ?? "not found")")
         print("simslim managed labels: \(SimslimManagedLabels.all.count)")
+        print("device settings: \(DeviceSettingsStore.fileURL.path)")
         print("SIMSLIM_BIN env: \(ProcessInfo.processInfo.environment["SIMSLIM_BIN"] ?? "—")")
     }
 
@@ -100,13 +101,17 @@ struct OrbitSlimCLI {
         }
         let stock = arguments.contains("--stock")
         let snapshot = await DeviceCatalog.load()
+        let settings = DeviceSettingsStore.load()
 
         if let sim = snapshot.simulators.first(where: { matches($0, target) }) {
             if sim.isBooted && (stock || sim.slim.isSlim) {
                 print("\(sim.name) is already booted.")
             } else if !stock, SimslimService.isInstalled, sim.slim.needsSlimming {
                 print("Slimming and booting \(sim.name)…")
-                try await SimslimService.enable(udid: sim.udid)
+                try await SimslimService.enable(
+                    udid: sim.udid,
+                    settings: settings.simslim[sim.udid] ?? SimslimSettings()
+                )
             } else {
                 print("Booting \(sim.name)…")
                 try await SimctlService.bootAndWait(sim.udid)
@@ -122,7 +127,10 @@ struct OrbitSlimCLI {
                 return
             }
             print("Booting \(emulator.avdName) via avdslim…")
-            let log = try await AndroidService.start(avd: emulator.avdName)
+            let log = try await AndroidService.start(
+                avd: emulator.avdName,
+                settings: settings.android[emulator.avdName] ?? AndroidLaunchSettings()
+            )
             let serial = try await AndroidService.waitForRunning(
                 avd: emulator.avdName,
                 timeout: 300,
@@ -163,11 +171,15 @@ struct OrbitSlimCLI {
             throw CLIError.usage(slim ? "slim <udid|avd>" : "unslim <udid|avd>")
         }
         let snapshot = await DeviceCatalog.load()
+        let settings = DeviceSettingsStore.load()
 
         if let sim = snapshot.simulators.first(where: { matches($0, target) }) {
             if slim {
                 print("Slimming \(sim.name)…")
-                try await SimslimService.enable(udid: sim.udid)
+                try await SimslimService.enable(
+                    udid: sim.udid,
+                    settings: settings.simslim[sim.udid] ?? SimslimSettings()
+                )
             } else {
                 print("Restoring stock services on \(sim.name)…")
                 try await SimslimService.disable(udid: sim.udid)
@@ -201,6 +213,7 @@ struct OrbitSlimCLI {
         }
         let explicitTarget = arguments.dropFirst().first
         let snapshot = await DeviceCatalog.load()
+        let settings = DeviceSettingsStore.load()
         let bundle: String
 
         switch url.pathExtension.lowercased() {
@@ -219,7 +232,10 @@ struct OrbitSlimCLI {
             if !sim.isBooted {
                 print("Booting \(sim.name)…")
                 if SimslimService.isInstalled && sim.slim.needsSlimming {
-                    try await SimslimService.enable(udid: sim.udid)
+                    try await SimslimService.enable(
+                        udid: sim.udid,
+                        settings: settings.simslim[sim.udid] ?? SimslimSettings()
+                    )
                 } else {
                     try await SimctlService.bootAndWait(sim.udid)
                 }
@@ -240,7 +256,10 @@ struct OrbitSlimCLI {
             var serial = emulator.serial
             if serial == nil {
                 print("Booting \(emulator.avdName)…")
-                let log = try await AndroidService.start(avd: emulator.avdName)
+                let log = try await AndroidService.start(
+                    avd: emulator.avdName,
+                    settings: settings.android[emulator.avdName] ?? AndroidLaunchSettings()
+                )
                 serial = try await AndroidService.waitForRunning(
                     avd: emulator.avdName,
                     timeout: 300,

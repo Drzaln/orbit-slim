@@ -86,11 +86,14 @@ public enum SimslimService {
 
     /// Persistent slim + boot. This is also the preferred boot path: it writes
     /// overrides offline when possible and boots once.
-    public static func enable(udid: String) async throws {
+    public static func enable(
+        udid: String,
+        settings: SimslimSettings = SimslimSettings()
+    ) async throws {
         guard isInstalled else { throw ShellError.toolNotFound("simslim") }
         let result = try await Shell.run(
             "simslim",
-            ["on", udid],
+            ["on", udid] + settings.arguments,
             timeout: 900
         )
         guard result.succeeded else {
